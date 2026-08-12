@@ -1,0 +1,215 @@
+# =====================================================================
+# Kong — configuração declarativa
+# ---------------------------------------------------------------------
+# Interpolado pelo entrypoint do compose (variáveis $VAR viram valores).
+#
+# ⚠️ A rota do Realtime aponta para `realtime-dev.supabase-realtime`.
+# Esse hostname NÃO é decorativo: o Realtime lê o tenant do subdomínio
+# (`realtime-dev`). Trocar por `realtime` ou `supabase-realtime` faz o
+# WebSocket conectar e nunca entregar evento — sem erro em log nenhum.
+# =====================================================================
+
+_format_version: "2.1"
+_transform: true
+
+consumers:
+  - username: anon
+    keyauth_credentials:
+      - key: $SUPABASE_ANON_KEY
+  - username: service_role
+    keyauth_credentials:
+      - key: $SUPABASE_SERVICE_KEY
+  # Consumer do painel (Studio).
+  #
+  # As credenciais são NINHADAS aqui, como em keyauth_credentials. Um bloco
+  # `basicauth_credentials:` no topo referenciando `consumer: dashboard`
+  # NÃO funciona: o Kong resolve consumer por chave primária, não por
+  # username, e falha com "in 'consumer': in 'id': missing primary key" —
+  # mensagem que não sugere qual é o problema.
+  - username: dashboard
+    basicauth_credentials:
+      - username: $DASHBOARD_USERNAME
+        password: $DASHBOARD_PASSWORD
+
+acls:
+  - consumer: anon
+    group: anon
+  - consumer: service_role
+    group: admin
+
+services:
+  # -------------------------------------------------------------------
+  # Auth — aberto (é aqui que o login acontece)
+  # -------------------------------------------------------------------
+  - name: auth-v1-open
+    url: http://auth:9999/verify
+    routes:
+      - name: auth-v1-open
+        strip_path: true
+        paths:
+          - /auth/v1/verify
+    plugins:
+      - name: cors
+
+  - name: auth-v1-open-callback
+    url: http://auth:9999/callback
+    routes:
+      - name: auth-v1-open-callback
+        strip_path: true
+        paths:
+          - /auth/v1/callback
+    plugins:
+      - name: cors
+
+  - name: auth-v1-open-authorize
+    url: http://auth:9999/authorize
+    routes:
+      - name: auth-v1-open-authorize
+        strip_path: true
+        paths:
+          - /auth/v1/authorize
+    plugins:
+      - name: cors
+
+  - name: auth-v1
+    _comment: "GoTrue: /auth/v1/* → http://auth:9999/*"
+    url: http://auth:9999/
+    routes:
+      - name: auth-v1-all
+        strip_path: true
+        paths:
+          - /auth/v1/
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: false
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin
+            - anon
+
+  # -------------------------------------------------------------------
+  # REST (PostgREST)
+  # -------------------------------------------------------------------
+  - name: rest-v1
+    _comment: "PostgREST: /rest/v1/* → http://rest:3000/*"
+    url: http://rest:3000/
+    routes:
+      - name: rest-v1-all
+        strip_path: true
+        paths:
+          - /rest/v1/
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: true
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin
+            - anon
+
+  # -------------------------------------------------------------------
+  # Realtime  ⚠️  hostname sensível — ver cabeçalho
+  # -------------------------------------------------------------------
+  - name: realtime-v1-ws
+    _comment: "Realtime WebSocket: /realtime/v1/* → ws://realtime-dev.supabase-realtime:4000/socket/*"
+    url: http://realtime-dev.supabase-realtime:4000/socket
+    protocol: http
+    routes:
+      - name: realtime-v1-ws
+        strip_path: true
+        paths:
+          - /realtime/v1/
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: false
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin
+            - anon
+
+  - name: realtime-v1-rest
+    _comment: "Realtime REST: /realtime/v1/api/* → http://realtime-dev.supabase-realtime:4000/api/*"
+    url: http://realtime-dev.supabase-realtime:4000/api
+    protocol: http
+    routes:
+      - name: realtime-v1-rest
+        strip_path: true
+        paths:
+          - /realtime/v1/api
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: false
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin
+            - anon
+
+  # -------------------------------------------------------------------
+  # Storage
+  # -------------------------------------------------------------------
+  - name: storage-v1
+    _comment: "Storage: /storage/v1/* → http://storage:5000/*"
+    url: http://storage:5000/
+    routes:
+      - name: storage-v1-all
+        strip_path: true
+        paths:
+          - /storage/v1/
+    plugins:
+      - name: cors
+
+  # -------------------------------------------------------------------
+  # Studio — protegido por basic auth
+  # -------------------------------------------------------------------
+  # O Studio não tem autenticação própria. Exposto direto numa porta ele
+  # dá acesso irrestrito ao banco a quem alcançar a máquina; por isso
+  # entra pelo Kong com basic auth.
+  - name: dashboard
+    _comment: "Studio: / -> http://studio:3000/"
+    url: http://studio:3000/
+    routes:
+      - name: dashboard-all
+        strip_path: true
+        paths:
+          - /
+    plugins:
+      - name: cors
+      - name: basic-auth
+        config:
+          hide_credentials: true
+
+  # -------------------------------------------------------------------
+  # Meta — apenas service_role (expõe o schema inteiro)
+  # -------------------------------------------------------------------
+  - name: meta
+    _comment: "pg-meta: /pg/* → http://meta:8080/*"
+    url: http://meta:8080/
+    routes:
+      - name: meta-all
+        strip_path: true
+        paths:
+          - /pg/
+    plugins:
+      - name: key-auth
+        config:
+          hide_credentials: false
+      - name: acl
+        config:
+          hide_groups_header: true
+          allow:
+            - admin

@@ -1,0 +1,329 @@
+# =====================================================================
+# Supabase self-hosted — Chaveiro Formiga
+# ---------------------------------------------------------------------
+#   docker compose up -d
+#   docker compose down -v      # apaga volumes → rebuild do zero
+#
+# Pegadinhas do Realtime self-hosted (todas travadas aqui — ver também
+# .env.example e docker/db-init/zz-chaveiro-bootstrap.sh):
+#   1. REALTIME_ENC_KEY com EXATAMENTE 16 caracteres (AES-128)
+#   2. container OBRIGATORIAMENTE `realtime-dev.supabase-realtime`
+#      (o tenant é resolvido pelo subdomínio; o Kong aponta para esse
+#      hostname) — nome diferente falha em SILÊNCIO
+#   3. Postgres com wal_level=logical
+#   4. o schema `_realtime` precisa existir ANTES de o container subir —
+#      ele roda as próprias migrations lá, mas não cria o schema
+# Não renomeie o serviço `realtime-dev.supabase-realtime`.
+# =====================================================================
+
+name: chaveiro-formiga
+
+services:
+  # -------------------------------------------------------------------
+  # Postgres
+  # -------------------------------------------------------------------
+  db:
+    container_name: chaveiro-db
+    image: supabase/postgres:15.8.1.060
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    command:
+      - postgres
+      # PEGADINHA 3: sem wal_level=logical não existe replicação lógica
+      # e o Realtime nunca recebe uma linha.
+      - -c
+      - wal_level=logical
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=warning
+    environment:
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD é obrigatório}
+      PGDATABASE: ${POSTGRES_DB:-postgres}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGPORT: 5432
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET é obrigatório}
+      JWT_EXP: ${JWT_EXPIRY:-3600}
+    ports:
+      # 54322 para casar com o padrão do Supabase CLI local.
+      - "54322:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # ATENÇÃO: nossos arquivos vão para /chaveiro, NÃO para dentro de
+      # /docker-entrypoint-initdb.d/. A imagem supabase/postgres tem os
+      # próprios `init-scripts/` e `migrations/` ali — são eles que criam
+      # o schema `extensions`, as roles (postgres, authenticator,
+      # supabase_auth_admin) e as senhas. Montar por cima apaga tudo isso
+      # e o banco sobe sem roles, derrubando auth, rest e storage.
+      - ./supabase/migrations:/chaveiro/migrations:ro
+      - ./supabase/seeds:/chaveiro/seeds:ro
+      # Só o bootstrap entra no initdb.d. O prefixo `zz-` é obrigatório:
+      # a ordem é alfabética e, em ASCII, dígitos vêm antes de letras — um
+      # `99-` rodaria ANTES do `migrate.sh` da imagem e o banco subiria sem
+      # o schema `extensions` e sem as roles.
+      - ./docker/db-init/zz-chaveiro-bootstrap.sh:/docker-entrypoint-initdb.d/zz-chaveiro-bootstrap.sh:ro
+
+  # -------------------------------------------------------------------
+  # Auth (GoTrue)
+  # -------------------------------------------------------------------
+  auth:
+    container_name: chaveiro-auth
+    image: supabase/gotrue:v2.177.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL:-http://localhost:8000}
+
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-postgres}
+
+      GOTRUE_SITE_URL: ${SITE_URL:-http://localhost:5186}
+      GOTRUE_URI_ALLOW_LIST: ${ADDITIONAL_REDIRECT_URLS}
+      GOTRUE_DISABLE_SIGNUP: ${DISABLE_SIGNUP:-true}
+
+      GOTRUE_JWT_ADMIN_ROLES: service_role
+      GOTRUE_JWT_AUD: authenticated
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: ${ENABLE_EMAIL_SIGNUP:-false}
+      GOTRUE_MAILER_AUTOCONFIRM: ${ENABLE_EMAIL_AUTOCONFIRM:-true}
+      GOTRUE_EXTERNAL_ANONYMOUS_USERS_ENABLED: ${ENABLE_ANONYMOUS_USERS:-false}
+      GOTRUE_EXTERNAL_PHONE_ENABLED: ${ENABLE_PHONE_SIGNUP:-false}
+      GOTRUE_SMS_AUTOCONFIRM: ${ENABLE_PHONE_AUTOCONFIRM:-false}
+      GOTRUE_PASSWORD_MIN_LENGTH: 8
+
+      GOTRUE_SMTP_ADMIN_EMAIL: ${SMTP_ADMIN_EMAIL}
+      GOTRUE_SMTP_HOST: ${SMTP_HOST}
+      GOTRUE_SMTP_PORT: ${SMTP_PORT}
+      GOTRUE_SMTP_USER: ${SMTP_USER}
+      GOTRUE_SMTP_PASS: ${SMTP_PASS}
+      GOTRUE_SMTP_SENDER_NAME: ${SMTP_SENDER_NAME:-Chaveiro Formiga}
+      GOTRUE_MAILER_URLPATHS_RECOVERY: ${MAILER_URLPATHS_RECOVERY:-/auth/v1/verify}
+      GOTRUE_MAILER_URLPATHS_CONFIRMATION: ${MAILER_URLPATHS_CONFIRMATION:-/auth/v1/verify}
+      GOTRUE_MAILER_URLPATHS_INVITE: ${MAILER_URLPATHS_INVITE:-/auth/v1/verify}
+      GOTRUE_MAILER_URLPATHS_EMAIL_CHANGE: ${MAILER_URLPATHS_EMAIL_CHANGE:-/auth/v1/verify}
+
+  # -------------------------------------------------------------------
+  # REST (PostgREST)
+  # -------------------------------------------------------------------
+  rest:
+    container_name: chaveiro-rest
+    image: postgrest/postgrest:v12.2.12
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-postgres}
+      PGRST_DB_SCHEMAS: public,storage,graphql_public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${JWT_SECRET}
+      PGRST_APP_SETTINGS_JWT_EXP: ${JWT_EXPIRY:-3600}
+      # Teto de linhas por requisição: a paginação do front nunca pede
+      # mais que isso (ver src/lib/listing.ts).
+      PGRST_DB_MAX_ROWS: 1000
+    command: postgrest
+
+  # -------------------------------------------------------------------
+  # Realtime
+  # -------------------------------------------------------------------
+  # ⚠️ PEGADINHA 2: o nome do container e do serviço TEM que ser
+  # `realtime-dev.supabase-realtime`. O Realtime extrai o tenant do
+  # subdomínio do Host da requisição; o Kong encaminha para este
+  # hostname. Qualquer outro nome → conexão aceita, zero eventos, zero
+  # erro no log.
+  realtime-dev.supabase-realtime:
+    container_name: realtime-dev.supabase-realtime
+    image: supabase/realtime:v2.34.47
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sSfL", "--head", "-o", "/dev/null",
+             "-H", "Authorization: Bearer ${ANON_KEY}",
+             "http://localhost:4000/api/tenants/realtime-dev/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      PORT: 4000
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: supabase_admin
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:-postgres}
+      DB_AFTER_CONNECT_QUERY: 'SET search_path TO _realtime'
+      DB_ENC_KEY: ${REALTIME_ENC_KEY:?REALTIME_ENC_KEY é obrigatório e precisa ter EXATAMENTE 16 caracteres}
+      API_JWT_SECRET: ${JWT_SECRET}
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:?SECRET_KEY_BASE é obrigatório (mínimo 64 caracteres)}
+      ERL_AFLAGS: -proto_dist inet_tcp
+      DNS_NODES: "''"
+      RLIMIT_NOFILE: "10000"
+      APP_NAME: realtime
+      SEED_SELF_HOST: "true"
+      # Precisa casar com o subdomínio do container.
+      TENANT_NAME: ${REALTIME_TENANT:-realtime-dev}
+      RUN_JANITOR: "true"
+
+  # -------------------------------------------------------------------
+  # Storage
+  # -------------------------------------------------------------------
+  storage:
+    container_name: chaveiro-storage
+    image: supabase/storage-api:v1.25.7
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_started
+    healthcheck:
+      # Duas armadilhas neste healthcheck:
+      #  1. `--spider` faz HEAD, e /status só responde a GET;
+      #  2. `localhost` resolve para [::1] (IPv6) dentro do container, mas o
+      #     storage-api escuta em 0.0.0.0 (IPv4) — daí "Connection refused"
+      #     num serviço que atende requisições normalmente.
+      # Com `127.0.0.1` e GET o check reflete a realidade.
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "-O", "/dev/null", "http://127.0.0.1:5000/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-postgres}
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-10485760}
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-file}
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      TENANT_ID: stub
+      REGION: stub
+      GLOBAL_S3_BUCKET: stub
+      ENABLE_IMAGE_TRANSFORMATION: "false"
+    volumes:
+      - storage-data:/var/lib/storage
+
+  # -------------------------------------------------------------------
+  # Meta (usado pelo Studio)
+  # -------------------------------------------------------------------
+  meta:
+    container_name: chaveiro-meta
+    image: supabase/postgres-meta:v0.91.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: ${POSTGRES_DB:-postgres}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+  # -------------------------------------------------------------------
+  # Studio
+  # -------------------------------------------------------------------
+  studio:
+    container_name: chaveiro-studio
+    image: supabase/studio:2025.06.30-sha-6f5982d
+    restart: unless-stopped
+    depends_on:
+      meta:
+        condition: service_started
+    healthcheck:
+      # DESABILITADO de propósito — `disable: true`, não omissão.
+      #
+      # A própria imagem do Studio declara um HEALTHCHECK no Dockerfile
+      # (`node -e "fetch('http://localhost:3000/api/platform/profile')"`).
+      # Omitir a chave aqui NÃO o remove: o do Dockerfile continua valendo,
+      # e o container fica "unhealthy" para sempre. Ele falha porque
+      # `localhost` resolve para IPv6 dentro do container e um `fetch` de um
+      # processo separado não alcança o servidor Next.js — enquanto o Kong o
+      # serve normalmente (HTTP 200).
+      #
+      # Um check que falha sempre é pior que nenhum: mascara problema real e
+      # pode travar `depends_on` de outros serviços. A saúde do Studio se
+      # verifica pelo Kong:
+      #   curl -u $DASHBOARD_USERNAME:$DASHBOARD_PASSWORD http://localhost:8000/
+      disable: true
+    ports:
+      - "${STUDIO_PORT:-54323}:3000"
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORGANIZATION:-Chaveiro Formiga}
+      DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT:-chaveiro-formiga}
+      SUPABASE_URL: http://kong:8000
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL:-http://localhost:8000}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      LOGFLARE_PRIVATE_ACCESS_TOKEN: ""
+      NEXT_PUBLIC_ENABLE_LOGS: "false"
+
+  # -------------------------------------------------------------------
+  # Kong (API Gateway) — porta única de entrada
+  # -------------------------------------------------------------------
+  kong:
+    container_name: chaveiro-kong
+    image: kong:2.8.1
+    restart: unless-stopped
+    depends_on:
+      auth:
+        condition: service_started
+      rest:
+        condition: service_started
+      storage:
+        condition: service_started
+    ports:
+      - "${KONG_HTTP_PORT:-8000}:8000"
+      - "${KONG_HTTPS_PORT:-8443}:8443"
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-supabase}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD:?DASHBOARD_PASSWORD é obrigatório}
+    volumes:
+      - ./docker/kong.yml:/home/kong/kong.template.yml:ro
+      - ./docker/kong-entrypoint.sh:/kong-entrypoint.sh:ro
+    # Substituição por sed, não por `eval echo` — ver o comentário no
+    # próprio script: o eval corrompe o YAML removendo aspas.
+    entrypoint: ["bash", "/kong-entrypoint.sh"]
+
+volumes:
+  db-data:
+  storage-data:

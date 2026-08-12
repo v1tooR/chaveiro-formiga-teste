@@ -1,0 +1,88 @@
+# Supabase local — Chaveiro Formiga
+# Docs: https://supabase.com/docs/guides/cli/config
+
+project_id = "chaveiro-formiga"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[api.tls]
+enabled = false
+
+[db]
+port = 54322
+shadow_port = 54320
+major_version = 15
+
+[db.pooler]
+enabled = false
+
+[realtime]
+enabled = true
+ip_version = "IPv4"
+
+[studio]
+enabled = true
+port = 54323
+api_url = "http://127.0.0.1"
+
+[inbucket]
+enabled = true
+port = 54324
+
+[storage]
+enabled = true
+# Fotos de comanda tiradas no balcão pelo celular.
+file_size_limit = "10MiB"
+
+[storage.image_transformation]
+enabled = false
+
+[auth]
+enabled = true
+site_url = "http://localhost:5186"
+additional_redirect_urls = ["http://localhost:5186", "http://localhost:4173"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+refresh_token_reuse_interval = 10
+# `enable_signup = false` bloqueia o AUTO-CADASTRO, mas mantém o login com
+# senha funcionando — diferente de desligar o provedor de e-mail em
+# [auth.email], que impediria qualquer login.
+enable_signup = false
+enable_anonymous_sign_ins = false
+enable_manual_linking = false
+minimum_password_length = 8
+
+[auth.email]
+# ATENÇÃO: `false` aqui desliga o provedor de e-mail inteiro, inclusive o
+# login com senha (o /token passa a responder "email_provider_disabled").
+# Quem bloqueia auto-cadastro é o `enable_signup` da seção [auth].
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false
+secure_password_change = true
+max_frequency = "1s"
+otp_length = 6
+otp_expiry = 86400
+
+[auth.sms]
+enable_signup = false
+
+[auth.mfa]
+max_enrolled_factors = 10
+
+[auth.mfa.totp]
+enroll_enabled = true
+verify_enabled = true
+
+[edge_runtime]
+enabled = true
+policy = "oneshot"
+inspector_port = 8083
+
+[analytics]
+enabled = false

@@ -1,0 +1,25 @@
+-- =====================================================================
+-- 20260730190000 — Exportação e PDF saem da tabela de integrações
+-- ---------------------------------------------------------------------
+-- `integrations` existe para serviço EXTERNO: o que precisa de provedor,
+-- de segredo e de uma Edge Function para falar com a API de terceiro.
+--
+-- `data_export` (CSV/XLSX) e `order_pdf` nunca foram isso. Os dados já
+-- estão na tela e o navegador sabe gerar arquivo e PDF — a exportação
+-- agora roda no cliente (src/lib/exportar.ts) e o PDF sai pela caixa de
+-- impressão, reaproveitando o layout de `@media print` que a comanda já
+-- tinha.
+--
+-- Mantê-las na tabela deixaria a tela de Configurações listando duas
+-- integrações "Inativas" enquanto os botões correspondentes funcionam —
+-- exatamente o tipo de informação errada que o relatório de QA apontou,
+-- só que ao contrário.
+--
+-- As quatro que SOBRAM dependem mesmo de terceiro:
+--   whatsapp_notify · whatsapp_order · whatsapp_receipt · report_share
+--
+-- DELETE físico, não soft: `integrations` é tabela de configuração, não
+-- de histórico. Idempotente.
+-- =====================================================================
+
+DELETE FROM "public"."integrations" WHERE "key" IN ('data_export', 'order_pdf');

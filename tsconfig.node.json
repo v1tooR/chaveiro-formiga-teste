@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "skipLibCheck": true,
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    // `composite` obriga a emitir. Sem redirecionar a saída, o tsc gera
+    // vite.config.js ao lado do .ts — e o Vite resolve o .js primeiro,
+    // passando a usar um config defasado.
+    "outDir": "./node_modules/.tmp/node",
+    "tsBuildInfoFile": "./node_modules/.tmp/tsconfig.node.tsbuildinfo"
+  },
+  "include": ["vite.config.ts"]
+}

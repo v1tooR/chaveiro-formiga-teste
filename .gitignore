@@ -1,0 +1,22 @@
+node_modules
+dist
+.vercel
+.DS_Store
+*.local
+
+# Artefatos do tsc -b (o vite.config.js gerado sobrepõe o .ts no Vite)
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
+# Ambiente
+.env
+.env.*
+!.env.example
+
+# Anotação local de credenciais (temporária, nunca versionada).
+# Segredo commitado fica no histórico do git mesmo depois de apagado.
+credenciais.md
+
+# Backups: contem dados de cliente e binarios. Nunca no repositorio.
+backups/

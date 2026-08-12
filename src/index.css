@@ -1,0 +1,311 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --bg: #f5f6f8;
+    --surface: #ffffff;
+    --surface-2: #faf9f6;
+    --border: #e6e9ed;
+    --text: #111317;
+    --text-muted: #6b7280;
+    --accent: #dfa92a;
+    --ring: rgba(223, 169, 42, 0.35);
+
+    --st-received: #3b82f6;
+    --st-analysis: #7c6bd6;
+    --st-approval: #d9930b;
+    --st-material: #d9930b;
+    --st-running: #7c6bd6;
+    --st-paused: #6b7280;
+    --st-ready: #2f7d5f;
+    --st-notified: #2f7d5f;
+    --st-delivered: #256349;
+    --st-canceled: #9aa1ac;
+    --st-late: #dc5b57;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink-50 text-ink-900 font-sans antialiased;
+    font-feature-settings: 'cv02', 'cv03', 'cv04';
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display tracking-tight;
+  }
+
+  ::selection {
+    background: rgba(223, 169, 42, 0.28);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+  }
+}
+
+@layer components {
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: 'tnum';
+  }
+
+  .card {
+    @apply bg-white border border-ink-100 rounded-card shadow-soft;
+  }
+
+  .card-hover {
+    @apply transition-all duration-200 hover:shadow-lift hover:-translate-y-[2px] hover:border-ink-200;
+  }
+
+  .field {
+    @apply w-full rounded-field border border-ink-200 bg-white px-3.5 py-2.5 text-[14px]
+           text-ink-900 placeholder:text-ink-400 transition
+           focus:border-brass-400 focus:ring-4 focus:ring-brass-400/15 focus:outline-none
+           disabled:bg-ink-50 disabled:text-ink-400;
+  }
+
+  .label {
+    @apply block text-[12px] font-semibold uppercase tracking-wider text-ink-500 mb-1.5;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-field px-4 py-2.5 text-[14px]
+           font-semibold transition-all duration-150 select-none
+           disabled:opacity-50 disabled:pointer-events-none active:scale-[.98];
+  }
+
+  .btn-primary {
+    @apply btn bg-ink-900 text-white hover:bg-ink-800 shadow-soft;
+  }
+
+  .btn-accent {
+    @apply btn bg-brass-400 text-ink-950 hover:bg-brass-300 shadow-soft;
+  }
+
+  .btn-ghost {
+    @apply btn bg-transparent text-ink-700 hover:bg-ink-100;
+  }
+
+  .btn-outline {
+    @apply btn border border-ink-200 bg-white text-ink-800 hover:bg-ink-50 hover:border-ink-300;
+  }
+
+  .btn-danger {
+    @apply btn bg-danger text-white hover:brightness-95;
+  }
+
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold
+           leading-none whitespace-nowrap;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-ink-200 bg-white px-3 py-1.5
+           text-[13px] font-medium text-ink-600 transition hover:border-ink-300 hover:bg-ink-50;
+  }
+
+  .chip-on {
+    @apply border-ink-900 bg-ink-900 text-white hover:bg-ink-800 hover:border-ink-900;
+  }
+
+  .skel {
+    @apply relative overflow-hidden bg-ink-100 rounded-lg;
+  }
+
+  .skel::after {
+    content: '';
+    @apply absolute inset-0 -translate-x-full animate-shimmer;
+    background-image: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.65), transparent);
+  }
+
+  .scroll-x {
+    scrollbar-width: thin;
+    scrollbar-color: #c7ccd3 transparent;
+  }
+
+  .scroll-x::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+
+  .scroll-x::-webkit-scrollbar-thumb {
+    @apply bg-ink-200 rounded-full;
+  }
+
+  .scroll-x::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .hide-scroll::-webkit-scrollbar {
+    display: none;
+  }
+
+  .hide-scroll {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  .grain {
+    background-image: radial-gradient(rgba(255, 255, 255, 0.045) 1px, transparent 1px);
+    background-size: 3px 3px;
+  }
+}
+
+/* ---------------------------------------------------------------------
+ * Impressão
+ * ---------------------------------------------------------------------
+ * Comanda, recibo de entrega e comprovante de pagamento saem de dentro de
+ * um <Modal>. Isso trazia três defeitos que só aparecem no papel:
+ *
+ *  1. O Modal trava `document.body.style.overflow = 'hidden'` enquanto
+ *     está aberto (ui.tsx). O navegador então imprime só o que cabe na
+ *     viewport e joga o resto numa segunda página quase em branco — era o
+ *     "1/2" que aparecia na pré-visualização.
+ *  2. A folha vive dentro de `fixed inset-0` com `max-h-[92vh]` e rolagem
+ *     própria; o que passa disso é simplesmente cortado.
+ *  3. Sem `print-color-adjust`, o navegador descarta TODO fundo. Badge de
+ *     tipo de foto, QR, faixas de aviso e o gradiente da foto sem arquivo
+ *     saíam brancos — o "Antes/Depois" some do comprovante que o cliente
+ *     assina.
+ * ------------------------------------------------------------------- */
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 12mm;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-only {
+    display: block !important;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+    height: auto !important;
+    /* Destrava o que o Modal travou — ver (1) acima. */
+    overflow: visible !important;
+  }
+
+  /* (3) — sem isto nenhum fundo vai para o papel. */
+  *,
+  *::before,
+  *::after {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* (2) — o modal deixa de ser janela flutuante e vira documento. */
+  .modal-shell {
+    position: static !important;
+    display: block !important;
+    padding: 0 !important;
+  }
+
+  .modal-card {
+    max-height: none !important;
+    max-width: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    display: block !important;
+  }
+
+  .modal-body {
+    overflow: visible !important;
+    max-height: none !important;
+    padding: 0 !important;
+  }
+
+  /*
+   * Só a folha vai ao papel.
+   *
+   * ⚠️ `display: none`, NÃO `visibility: hidden`.
+   *
+   * A primeira tentativa usou `visibility`, e o resultado foi uma PÁGINA
+   * EM BRANCO na frente: `visibility: hidden` esconde mas mantém o
+   * elemento ocupando espaço, então o app inteiro continuava reservando
+   * uma folha de altura e a comanda só começava na página 2.
+   *
+   * O `<Modal>` é renderizado por portal em `document.body`, então esconder
+   * os filhos diretos de `body` que não contêm a folha remove a aplicação
+   * inteira do fluxo e a folha sobe para o topo da primeira página.
+   *
+   * O `:has()` é deliberado: Relatórios também imprime, e imprime a PÁGINA
+   * INTEIRA, sem `.print-sheet`. Sem essa condição, mandar imprimir os
+   * relatórios devolveria uma folha em branco. Onde `:has()` não existir,
+   * degrada para o comportamento antigo — nada é escondido, nada quebra.
+   */
+  body:has(.print-sheet) > *:not(:has(.print-sheet)) {
+    display: none !important;
+  }
+
+  .print-sheet {
+    box-shadow: none !important;
+    border: none !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  /* Assinatura, QR e foto não podem ser partidos ao meio pela quebra. */
+  .print-sheet img,
+  .print-sheet svg,
+  .print-evitar-quebra {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  /* A folha de etiquetas é montada fora da tela; no papel ela é o conteúdo. */
+  .fora-da-tela {
+    position: static !important;
+    left: auto !important;
+  }
+}
+
+/*
+ * Conteúdo que existe só para o papel.
+ *
+ * `display: none` não serve: elemento sem caixa não é medido, e a folha de
+ * etiquetas precisa estar disposta antes de `window.print()`. Fora da tela
+ * ele é montado e medido normalmente, sem piscar para o operador.
+ */
+.fora-da-tela {
+  position: absolute;
+  left: -10000px;
+  top: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

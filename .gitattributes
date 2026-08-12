@@ -1,0 +1,14 @@
+# Fim de linha travado em LF.
+#
+# Os scripts de docker/ são bind-mounted e executados DENTRO dos containers
+# Linux (entrypoint do Kong, db-init do Postgres). Com CRLF o shebang vira
+# `#!/usr/bin/env bash\r` e o container morre com "bad interpreter".
+#
+# O .env.example também: gen-keys.mjs casa `^([A-Z][A-Z0-9_]*)=(.*)$`, e em
+# JavaScript `.` não casa \r — com CRLF o .env sai sem nenhum segredo e o
+# app abre em tela branca.
+#
+# Um clone no Windows com core.autocrlf=true reintroduz os dois problemas.
+* text=auto eol=lf
+
+*.pdf binary
