@@ -84,6 +84,42 @@ export default function ClienteDetalhe() {
   const alternarBloqueio = useAcao(bloquearCliente)
   const apagar = useAcao(removerCliente)
 
+  /**
+   * Entrada da comanda + cada pagamento posterior, um por linha.
+   *
+   * Este hook precisa rodar em todas as renderizações. Antes ele ficava
+   * depois dos retornos de loading/erro e quebrava a ordem dos hooks quando
+   * os dados do cliente terminavam de carregar.
+   */
+  const pagamentos = useMemo(() => {
+    const minhas = comandas.dados?.linhas ?? []
+    const posteriores = pagamentosQ.dados ?? []
+    const entradas = minhas
+      .filter((o) => o.entrada > 0)
+      .map((o) => ({
+        id: `entrada-${o.id}`,
+        em: o.criadaEm,
+        valor: o.entrada,
+        rotulo: 'Entrada',
+        comandaId: o.id,
+        comandaNumero: o.numero,
+        servico: o.servicoNome,
+      }))
+
+    const porComanda = new Map(minhas.map((o) => [o.id, o]))
+    const demais = posteriores.map((p) => ({
+      id: p.id,
+      em: p.em,
+      valor: p.valor,
+      rotulo: 'Pagamento',
+      comandaId: p.comandaId,
+      comandaNumero: p.comandaNumero,
+      servico: porComanda.get(p.comandaId)?.servicoNome ?? '—',
+    }))
+
+    return [...entradas, ...demais].sort((a, b) => +new Date(b.em) - +new Date(a.em))
+  }, [comandas.dados?.linhas, pagamentosQ.dados])
+
   if (cliente.carregando && !cliente.dados) {
     return (
       <div>
@@ -125,41 +161,6 @@ export default function ClienteDetalhe() {
   const abertas = minhas.filter((o) => !dom.st(o.status).final)
   const comFoto = minhas.filter((o) => o.fotosQtd > 0)
   const totalFotos = minhas.reduce((s, o) => s + o.fotosQtd, 0)
-
-  /**
-   * Entrada da comanda + cada pagamento posterior, um por linha.
-   *
-   * Antes isto era derivado de `orders.amount_paid` — UMA linha por
-   * comanda, com a data de criação dela. Duas parcelas de R$ 320 viravam
-   * "R$ 640" na data errada; o total batia, o detalhamento não.
-   */
-  const posteriores = pagamentosQ.dados ?? []
-  const pagamentos = useMemo(() => {
-    const entradas = minhas
-      .filter((o) => o.entrada > 0)
-      .map((o) => ({
-        id: `entrada-${o.id}`,
-        em: o.criadaEm,
-        valor: o.entrada,
-        rotulo: 'Entrada',
-        comandaId: o.id,
-        comandaNumero: o.numero,
-        servico: o.servicoNome,
-      }))
-
-    const porComanda = new Map(minhas.map((o) => [o.id, o]))
-    const demais = posteriores.map((p) => ({
-      id: p.id,
-      em: p.em,
-      valor: p.valor,
-      rotulo: 'Pagamento',
-      comandaId: p.comandaId,
-      comandaNumero: p.comandaNumero,
-      servico: porComanda.get(p.comandaId)?.servicoNome ?? '—',
-    }))
-
-    return [...entradas, ...demais].sort((a, b) => +new Date(b.em) - +new Date(a.em))
-  }, [minhas, posteriores])
 
   const pendente = c.pendente ?? 0
 

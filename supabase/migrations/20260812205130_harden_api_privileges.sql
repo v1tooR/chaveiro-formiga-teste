@@ -23,7 +23,16 @@ REVOKE EXECUTE ON FUNCTION public.log_order_event(uuid, text, text) FROM "authen
 REVOKE EXECUTE ON FUNCTION public.recalc_customer_status(uuid) FROM "authenticated";
 REVOKE EXECUTE ON FUNCTION public.recalc_order_amount_paid(uuid) FROM "authenticated";
 REVOKE EXECUTE ON FUNCTION public.recalc_order_from_items(uuid) FROM "authenticated";
-REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM "authenticated";
+-- `rls_auto_enable()` exists in some hosted projects, but is not part of a
+-- fresh local Supabase database. Keep this historical migration replayable in
+-- both environments without weakening projects where the helper is present.
+DO $$
+BEGIN
+  IF to_regprocedure('public.rls_auto_enable()') IS NOT NULL THEN
+    EXECUTE 'REVOKE EXECUTE ON FUNCTION public.rls_auto_enable() FROM "authenticated"';
+  END IF;
+END
+$$;
 REVOKE EXECUTE ON FUNCTION public.trg_audit() FROM "authenticated";
 REVOKE EXECUTE ON FUNCTION public.trg_audit_app_settings() FROM "authenticated";
 REVOKE EXECUTE ON FUNCTION public.trg_order_items_sync_order() FROM "authenticated";
